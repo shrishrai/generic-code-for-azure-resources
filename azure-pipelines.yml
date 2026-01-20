@@ -1,0 +1,92 @@
+trigger: none
+pool: agent vinod
+
+stages:
+  - stage: pre-infra-checks
+    displayName: Pre Infra Checks
+    jobs:
+      - job: code_quality_check
+        displayName: Infra-Job
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: TerraformTask@5
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              backendServiceArm: 'Shrish'
+              backendAzureRmResourceGroupName: 'RG'
+              backendAzureRmStorageAccountName: 'storage_account'
+              backendAzureRmContainerName: 'Blob'
+              backendAzureRmKey: 'tfstate'
+
+          - task: TerraformTask@5
+            inputs:
+              provider: 'azurerm'
+              command: 'validate'
+
+          - task: TerraformTask@5
+            inputs:
+              provider: 'azurerm'
+              command: 'custom'
+              outputTo: 'console'
+              customCommand: 'fmt'
+              environmentServiceNameAzureRM: 'Shrish'
+
+          - task: TerraformTask@5
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              environmentServiceNameAzureRM: 'Shrish'
+
+  - stage: security
+    displayName: Code Scanning
+    jobs:
+      - job: code-scanning-job
+        displayName: Infra-Code-Scanning-Job
+        steps:
+          - task: tfsec@1
+            inputs:
+              version: 'v1.26.0'
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.x'
+              addToPath: true
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install checkov
+            displayName: 'Install Checkov'
+
+          - script: |
+              checkov -d $(System.DefaultWorkingDirectory)/Terraform
+            displayName: 'Run Checkov Scan'
+            continueOnError: false
+
+  - stage: manualvalidation
+    displayName: Manual Validation
+    pool: server
+    dependsOn:
+      - pre-infra-checks
+      - security
+    jobs:
+      - job: manualvalidation
+        displayName: Manual Validation
+        steps:
+          - task: ManualValidation@1
+            inputs:
+              notifyUsers: 'shrishrai95.5@gmail.com'
+              approvers: 'shrishrai95.5@gmail.com'
+        
+      - job: deploy
+        displayName: Apply Terraform
+        pool: agent vinod
+        steps:
+          - task: TerraformTask@5
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              environmentServiceNameAzureRM: 'Shrish'
